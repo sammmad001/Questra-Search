@@ -1,5 +1,7 @@
 # Questra-Search V3 移动端网页适配方案
 
+> **⚠️ 状态：部分已完成。** viewport meta 增强、safe-area 处理、dvh 高度、触摸目标优化已完成。部分布局描述（如 `.msg-user` 右对齐气泡）已过时，实际实现采用 Lucide 图标方案。
+
 ## 概述
 
 为 Questra-Search V3 网页端添加完整的 iOS/Android 移动浏览器适配，确保在 iPhone SE (375px) 到 iPhone 15 Pro Max (430px) 及各种 Android 设备上均能稳定、流畅地使用。

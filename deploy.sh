@@ -13,21 +13,87 @@ LOCAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="/opt/questra-search-backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SKIP_BACKUP=false
+ROLLBACK=false
 
 # 解析参数
 for arg in "$@"; do
     case $arg in
         --skip-backup) SKIP_BACKUP=true ;;
+        --rollback) ROLLBACK=true ;;
     esac
 done
 
+SSH="ssh -T -o StrictHostKeyChecking=no $ECS_USER@$ECS_HOST"
+
+# ============================================================
+# 回滚模式：从最新备份恢复
+# ============================================================
+if [ "$ROLLBACK" = true ]; then
+    echo "============================================"
+    echo "  Questra-Search 回滚模式"
+    echo "============================================"
+
+    # 列出可用备份
+    echo "可用备份:"
+    $SSH "ls -dt $BACKUP_DIR/*/ 2>/dev/null | head -5 || echo '  (无备份)'"
+
+    LATEST_BACKUP=$($SSH "ls -dt $BACKUP_DIR/*/ 2>/dev/null | head -1 | tr -d '\n'")
+    if [ -z "$LATEST_BACKUP" ]; then
+        echo "错误: 没有可用的备份"
+        exit 1
+    fi
+
+    echo ""
+    echo "将回滚到: $LATEST_BACKUP"
+
+    # 停止服务
+    echo ""
+    echo "[1/4] 停止服务..."
+    $SSH "systemctl stop questra-search" || true
+
+    # 恢复代码
+    echo "[2/4] 恢复应用代码..."
+    $SSH "
+        rm -rf $REMOTE_DIR/app $REMOTE_DIR/static
+        cp -r $LATEST_BACKUP/app $REMOTE_DIR/app 2>/dev/null || true
+        cp -r $LATEST_BACKUP/static $REMOTE_DIR/static 2>/dev/null || true
+        cp $LATEST_BACKUP/server.py $REMOTE_DIR/ 2>/dev/null || true
+        cp $LATEST_BACKUP/requirements.txt $REMOTE_DIR/ 2>/dev/null || true
+        cp $LATEST_BACKUP/init_db.py $REMOTE_DIR/ 2>/dev/null || true
+    "
+
+    # 恢复数据库（如果有备份）
+    echo "[3/4] 恢复数据库..."
+    DB_BACKUP=$($SSH "ls $BACKUP_DIR/questra_search_db_* 2>/dev/null | sort | tail -1 | tr -d '\n'")
+    if [ -n "$DB_BACKUP" ]; then
+        $SSH "cp $DB_BACKUP $REMOTE_DIR/data/questra_search.db"
+        echo "  数据库已从 $DB_BACKUP 恢复"
+    else
+        echo "  (无数据库备份，跳过)"
+    fi
+
+    # 重启服务
+    echo "[4/4] 重启服务..."
+    $SSH "systemctl restart questra-search"
+    sleep 3
+
+    echo ""
+    if $SSH "curl -sf http://localhost:8900/api/health" > /dev/null 2>&1; then
+        echo "回滚成功! 服务已恢复正常"
+    else
+        echo "警告: 回滚后服务未响应，请手动检查"
+    fi
+    exit 0
+fi
+
+# ============================================================
+# 正常部署流程
+# ============================================================
 echo "============================================"
 echo "  Questra-Search 生产环境部署"
 echo "  目标: $ECS_USER@$ECS_HOST:$REMOTE_DIR"
 echo "  时间: $TIMESTAMP"
 echo "============================================"
-
-SSH="ssh -T -o StrictHostKeyChecking=no $ECS_USER@$ECS_HOST"
 
 # ============================================================
 # 第一步: 上传文件到 ECS 临时目录
@@ -495,3 +561,5 @@ echo "  查看邀请码: ssh $ECS_USER@$ECS_HOST 'sqlite3 /opt/questra-search/da
 echo "  编辑配置: ssh $ECS_USER@$ECS_HOST 'vi /opt/questra-search/.env'"
 echo "  Nginx 测试: ssh $ECS_USER@$ECS_HOST 'nginx -t && systemctl reload nginx'"
 echo "  Cloudflare 配置参考: cat domestic-access-architecture.md"
+echo ""
+echo "回滚命令: ./deploy.sh --rollback  (从最新备份恢复)"

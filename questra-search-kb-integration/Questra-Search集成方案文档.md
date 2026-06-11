@@ -152,13 +152,16 @@ KbRetrySender 类：
 
 #### 3.3.6 `app/main.py` — 注册调度器
 
-在 lifespan 中：
+在 lifespan 中（v1.0.1 已优化为直接使用 aiosqlite.connect 避免资源泄漏）：
 ```python
-db = await get_db().__anext__()
-_kb_retry = KbRetrySender(db, interval_seconds=300)
-_kb_retry.start()
+kb_db = await aiosqlite.connect(DATABASE_PATH)
+kb_db.row_factory = aiosqlite.Row
+await kb_db.execute("PRAGMA foreign_keys=ON")
+kb_sender = KbRetrySender(kb_db, interval_seconds=300)
+kb_sender.start()
 # ...
-_kb_retry.stop()
+kb_sender.stop()
+await kb_db.close()
 ```
 
 ### 3.4 安全设计
