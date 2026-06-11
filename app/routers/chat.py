@@ -83,7 +83,7 @@ async def chat(
     request_id = str(uuid.uuid4())[:8]
 
     # 注入搜索引导指令 + Prompts 框架富化
-    enriched_message = _enrich_message(user_message)
+    enriched_message = await _enrich_message(user_message)
 
     # 选择流式生成器
     if use_responses_api:

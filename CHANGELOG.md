@@ -2,6 +2,11 @@
 
 All notable changes to Questra-Search are documented in this file.
 
+## [v1.0.3] - 2026-06-11
+
+### Fixed
+- 修复 chat.py 缺少 await 导致聊天请求返回空内容
+
 ## [v1.0.2] - 2026-06-10
 
 ### Changed
