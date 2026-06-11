@@ -2,11 +2,12 @@
 Questra-Search - FastAPI 应用
 """
 from contextlib import asynccontextmanager
+import aiosqlite
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
 
-from app.database import init_db, get_db
+from app.database import init_db
+from app.config import DATABASE_PATH
 from app.routers import pages, auth, chat, sessions, history, export
 from app.services.kb_retry import KbRetrySender
 
@@ -16,17 +17,19 @@ async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化数据库 + KB 重试调度器"""
     await init_db()
 
-    # 启动 KB 重试调度器（每 5 分钟扫描未发送消息）
-    db_gen = get_db()
-    db = await db_gen.__anext__()
-    kb_sender = KbRetrySender(db, interval_seconds=300)
+    # 创建独立的数据库连接供 KB 重试调度器使用
+    kb_db = await aiosqlite.connect(DATABASE_PATH)
+    kb_db.row_factory = aiosqlite.Row
+    await kb_db.execute("PRAGMA foreign_keys=ON")
+
+    kb_sender = KbRetrySender(kb_db, interval_seconds=300)
     kb_sender.start()
 
     yield
 
-    # 关闭 KB 重试调度器
+    # 关闭 KB 重试调度器 + 释放数据库连接
     kb_sender.stop()
-    await db.close()
+    await kb_db.close()
 
 
 app = FastAPI(title="Questra-Search", lifespan=lifespan)

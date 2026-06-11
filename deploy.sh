@@ -131,6 +131,14 @@ JWT_ALGORITHM=HS256
 JWT_EXPIRE_HOURS=168
 COOKIE_SECURE=false
 DATABASE_PATH=data/questra_search.db
+
+# ── 个人知识库集成 ──
+# KB_API_BASE: 知识库 API 地址（需根据实际部署调整）
+KB_API_BASE=http://localhost:8080
+# KB_API_TOKEN: 知识库 API 认证令牌（需与 KB 侧 KNOWLEDGE_API_TOKEN 一致）
+KB_API_TOKEN=
+# KB_AUTO_INGEST: 是否自动导入聊天内容到知识库（true/false）
+KB_AUTO_INGEST=true
 ENVFILE
     fi
     JWT_SECRET=$(openssl rand -hex 32)

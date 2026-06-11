@@ -58,6 +58,8 @@ class StreamRecorder:
         self.usage: dict = {}
         self.response_id: Optional[str] = None
         self.status = "completed"
+        # 保存后获取的 message_id，用于 KB 入库后标记 kb_sent
+        self._assistant_msg_id: Optional[int] = None
 
         # 独立的数据库连接（生命周期与流式传输同步）
         self._own_db = None
@@ -168,6 +170,11 @@ class StreamRecorder:
                 self.status,
             )
         )
+        cursor = await db.execute(
+            "SELECT last_insert_rowid()"
+        )
+        row = await cursor.fetchone()
+        self._assistant_msg_id = row[0] if row else None
         await db.commit()
 
         # ── 知识库集成：fire-and-forget 异步 POST，不阻塞 SSE 流 ──
@@ -223,6 +230,14 @@ class StreamRecorder:
                         "KB 入库成功: session=%d tokens=%d",
                         self.session_id, total_tokens,
                     )
+                    # 标记 kb_sent=1，避免 kb_retry 重复发送
+                    if self._assistant_msg_id:
+                        db = await self._get_db()
+                        await db.execute(
+                            "UPDATE messages SET kb_sent = 1 WHERE id = ?",
+                            (self._assistant_msg_id,),
+                        )
+                        await db.commit()
                 else:
                     logger.warning(
                         "KB 入库失败: session=%d HTTP %d: %s",
