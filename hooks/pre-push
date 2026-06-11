@@ -1,0 +1,28 @@
+#!/bin/bash
+# ============================================================
+# Layer 2: pre-push hook
+# 触发时机: git push
+# 调用 pre-deploy-check.sh 执行全量 6 步验证
+# ============================================================
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$(dirname "$0")/.." && pwd)")"
+
+echo ""
+echo "🔍 [pre-push] 全量部署前验证..."
+
+if [ -x "$REPO_ROOT/pre-deploy-check.sh" ]; then
+    "$REPO_ROOT/pre-deploy-check.sh"
+    EXIT_CODE=$?
+    if [ $EXIT_CODE -ne 0 ]; then
+        echo ""
+        echo "❌ 部署前验证失败，push 已阻止"
+        echo "   请修复问题后重新 commit 再 push"
+        exit 1
+    fi
+else
+    echo "⚠️  pre-deploy-check.sh 不存在或不可执行，跳过验证"
+fi
+
+echo ""
+echo "✅ [pre-push] 验证通过，允许推送"

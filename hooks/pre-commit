@@ -1,0 +1,70 @@
+#!/bin/bash
+# ============================================================
+# Layer 1: pre-commit hook
+# 触发时机: git commit
+# 检查内容: Python 编译 + ruff 语法 + pytest 快速测试 + 静态文件
+# 耗时目标: < 30 秒
+# ============================================================
+set -euo pipefail
+
+echo ""
+echo "🔍 [pre-commit] 自动验证中..."
+
+# ── Step 1: Python 编译检查 ──
+echo "  [1/4] Python 编译检查..."
+FAILED=0
+for f in $(find app tests -name '*.py' 2>/dev/null); do
+    if ! python3 -m py_compile "$f" 2>/dev/null; then
+        echo "    ✗ 编译失败: $f"
+        FAILED=$((FAILED + 1))
+    fi
+done
+for f in server.py init_db.py; do
+    if [ -f "$f" ] && ! python3 -m py_compile "$f" 2>/dev/null; then
+        echo "    ✗ 编译失败: $f"
+        FAILED=$((FAILED + 1))
+    fi
+done
+if [ $FAILED -gt 0 ]; then
+    echo "  ❌ Python 编译检查失败 ($FAILED 个文件)，commit 已阻止"
+    exit 1
+fi
+echo "  ✓ 编译通过"
+
+# ── Step 2: ruff 语法风格检查（可选） ──
+echo "  [2/4] 代码风格检查..."
+if command -v ruff &> /dev/null; then
+    if ruff check app/ tests/ --quiet 2>/dev/null; then
+        echo "  ✓ ruff 检查通过"
+    else
+        echo "  ⚠ ruff 发现问题，但不阻止 commit（请手动修复）"
+    fi
+else
+    echo "  - ruff 未安装，跳过 (pip install ruff)"
+fi
+
+# ── Step 3: pytest 快速冒烟测试 ──
+echo "  [3/4] 快速测试 (test_health + test_models)..."
+if python3 -m pytest tests/test_health.py tests/test_models.py -x -q --tb=short 2>&1; then
+    echo "  ✓ 快速测试通过"
+else
+    echo "  ❌ pytest 快速测试失败，commit 已阻止"
+    exit 1
+fi
+
+# ── Step 4: 静态文件存在性检查 ──
+echo "  [4/4] 静态文件完整性..."
+for f in static/index.html static/app.js static/app.css; do
+    if [ ! -f "$f" ]; then
+        echo "  ❌ 缺失: $f"
+        exit 1
+    fi
+    if [ ! -s "$f" ]; then
+        echo "  ❌ 空文件: $f"
+        exit 1
+    fi
+done
+echo "  ✓ 静态文件完整"
+
+echo "✅ [pre-commit] 检查全部通过"
+echo ""

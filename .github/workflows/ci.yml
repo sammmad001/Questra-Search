@@ -1,0 +1,115 @@
+name: CI - Questra-Search
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ═══════════════════════════════════════════════
+  # Job 1: 后端测试（Python 矩阵）
+  # ═══════════════════════════════════════════════
+  backend-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio
+
+      - name: Install system deps (WeasyPrint)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info
+
+      - name: Python compile check
+        run: |
+          find app tests -name '*.py' -print0 | xargs -0 python -m py_compile
+          python -m py_compile server.py
+          python -m py_compile init_db.py
+
+      - name: Import sanity check
+        run: |
+          python -c "import app.config; import app.database; import app.models; import app.auth"
+          python -c "import app.routers.auth; import app.routers.chat; import app.routers.export"
+          python -c "import app.routers.history; import app.routers.pages; import app.routers.sessions"
+          python -c "import app.services.kb_retry; import app.services.pdf_generator; import app.services.stream_recorder"
+          python -c "import app.main"
+
+      - name: Run tests with coverage
+        env:
+          DATABASE_PATH: ":memory:"
+          JWT_SECRET: "test-ci-secret-do-not-use-in-production"
+          KB_AUTO_INGEST: "false"
+        run: |
+          python -m pytest tests/ -v --tb=short \
+            --cov=app --cov-report=term-missing --cov-report=xml \
+            -p no:warnings
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: backend
+        continue-on-error: true
+
+  # ═══════════════════════════════════════════════
+  # Job 2: 前端静态文件检查
+  # ═══════════════════════════════════════════════
+  frontend-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check static files exist
+        run: |
+          for f in static/index.html static/app.js static/app.css; do
+            [ -f "$f" ] && [ -s "$f" ] || { echo "FAIL: $f missing or empty"; exit 1; }
+            echo "OK: $f ($(wc -c < "$f") bytes)"
+          done
+
+      - name: HTML validation check
+        run: |
+          grep -q '<!DOCTYPE html>' static/index.html || { echo "FAIL: Missing DOCTYPE"; exit 1; }
+          grep -q '</html>' static/index.html || { echo "FAIL: Missing closing html tag"; exit 1; }
+          echo "OK: HTML structure valid"
+
+      - name: JavaScript syntax check
+        run: |
+          node --check static/app.js && echo "OK: JavaScript syntax valid" || { echo "FAIL: JavaScript syntax error"; exit 1; }
+
+      - name: CSS basic check
+        run: |
+          OPEN=$(grep -o '{' static/app.css | wc -l)
+          CLOSE=$(grep -o '}' static/app.css | wc -l)
+          if [ "$OPEN" -ne "$CLOSE" ]; then
+            echo "WARN: CSS braces mismatch (open=$OPEN, close=$CLOSE)"
+          else
+            echo "OK: CSS braces balanced ($OPEN pairs)"
+          fi
+
+      - name: Check config completeness
+        run: |
+          echo "=== Checking .env.example ==="
+          grep -q "MIROMIND_API_KEY" .env.example && echo "OK: MIROMIND_API_KEY" || echo "WARN: MIROMIND_API_KEY missing"
+          grep -q "JWT_SECRET" .env.example && echo "OK: JWT_SECRET" || echo "WARN: JWT_SECRET missing"
+          grep -q "DATABASE_PATH" .env.example && echo "OK: DATABASE_PATH" || echo "WARN: DATABASE_PATH missing"
+          grep -q "PORT" .env.example && echo "OK: PORT" || echo "WARN: PORT missing"

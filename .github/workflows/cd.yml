@@ -1,0 +1,215 @@
+name: CD - Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production  # GitHub Environments 保护
+
+    env:
+      ECS_HOST: "43.106.12.79"
+      ECS_USER: "root"
+      REMOTE_DIR: "/opt/questra-search"
+      BACKUP_DIR: "/opt/questra-search-backups"
+      SERVICE_NAME: "questra-search"
+      HEALTH_URL: "http://localhost:8900/api/health"
+      TIMESTAMP: ${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
+
+      # ═══════════════════════════════════════════
+      # Step 1: 远程备份
+      # ═══════════════════════════════════════════
+      - name: Remote backup
+        run: |
+          echo "[Step 1/5] 执行远程备份..."
+          ssh -o StrictHostKeyChecking=no ${ECS_USER}@${ECS_HOST} "
+            mkdir -p ${BACKUP_DIR}/${TIMESTAMP}
+            if [ -d '${REMOTE_DIR}/app' ]; then
+              cp -r ${REMOTE_DIR}/app ${BACKUP_DIR}/${TIMESTAMP}/ 2>/dev/null || true
+              cp -r ${REMOTE_DIR}/static ${BACKUP_DIR}/${TIMESTAMP}/ 2>/dev/null || true
+              cp ${REMOTE_DIR}/server.py ${BACKUP_DIR}/${TIMESTAMP}/ 2>/dev/null || true
+              cp ${REMOTE_DIR}/requirements.txt ${BACKUP_DIR}/${TIMESTAMP}/ 2>/dev/null || true
+              cp ${REMOTE_DIR}/.env ${BACKUP_DIR}/${TIMESTAMP}/.env.backup 2>/dev/null || true
+            fi
+            if [ -f '${REMOTE_DIR}/data/questra_search.db' ]; then
+              sqlite3 ${REMOTE_DIR}/data/questra_search.db \".backup ${BACKUP_DIR}/questra_search_db_${TIMESTAMP}\" 2>/dev/null || true
+            fi
+            echo 'Backup completed: ${BACKUP_DIR}/${TIMESTAMP}'
+          "
+          echo "  [OK] 备份完成"
+
+      # ═══════════════════════════════════════════
+      # Step 2: rsync 上传代码
+      # ═══════════════════════════════════════════
+      - name: Deploy code
+        run: |
+          echo "[Step 2/5] 上传代码到 ECS..."
+
+          ssh -o StrictHostKeyChecking=no ${ECS_USER}@${ECS_HOST} "mkdir -p /tmp/questra-search-deploy"
+
+          # rsync app/ (排除不必要的文件)
+          rsync -az --delete \
+            --exclude '__pycache__' --exclude '*.pyc' \
+            --exclude '.git' \
+            app/ ${ECS_USER}@${ECS_HOST}:/tmp/questra-search-deploy/app/
+
+          # rsync static/
+          rsync -az \
+            static/ ${ECS_USER}@${ECS_HOST}:/tmp/questra-search-deploy/static/
+
+          # rsync 顶层文件
+          rsync -az \
+            server.py init_db.py requirements.txt .env.example \
+            ${ECS_USER}@${ECS_HOST}:/tmp/questra-search-deploy/
+
+          echo "  [OK] 代码上传完成"
+
+      # ═══════════════════════════════════════════
+      # Step 3: 执行远程部署
+      # ═══════════════════════════════════════════
+      - name: Install and restart
+        run: |
+          echo "[Step 3/5] 执行远程部署..."
+
+          ssh -o StrictHostKeyChecking=no ${ECS_USER}@${ECS_HOST} '
+            set -euo pipefail
+            REMOTE_DIR="'${REMOTE_DIR}'"
+
+            echo "  停止服务..."
+            systemctl stop questra-search 2>/dev/null || true
+            sleep 1
+
+            echo "  部署文件..."
+            rm -rf $REMOTE_DIR/app
+            cp -r /tmp/questra-search-deploy/app $REMOTE_DIR/
+            rm -rf $REMOTE_DIR/static/*
+            cp -r /tmp/questra-search-deploy/static/* $REMOTE_DIR/static/
+            cp /tmp/questra-search-deploy/server.py $REMOTE_DIR/
+            cp /tmp/questra-search-deploy/init_db.py $REMOTE_DIR/
+            cp /tmp/questra-search-deploy/requirements.txt $REMOTE_DIR/
+            cp /tmp/questra-search-deploy/.env.example $REMOTE_DIR/ 2>/dev/null || true
+
+            if [ ! -f $REMOTE_DIR/.env ]; then
+              cp $REMOTE_DIR/.env.example $REMOTE_DIR/.env
+            fi
+
+            rm -rf /tmp/questra-search-deploy
+
+            echo "  安装依赖..."
+            cd $REMOTE_DIR
+            source venv/bin/activate
+            pip install --upgrade pip 2>/dev/null || true
+            pip install -r requirements.txt 2>&1 | tail -5
+
+            chmod 600 $REMOTE_DIR/.env
+            chmod 700 $REMOTE_DIR/data
+
+            echo "  启动服务..."
+            systemctl start questra-search
+            sleep 2
+            echo "  [OK] 部署完成"
+          '
+          echo "  [OK] 远程部署完成"
+
+      # ═══════════════════════════════════════════
+      # Step 4: 健康检查（3 次重试）
+      # ═══════════════════════════════════════════
+      - name: Health check
+        run: |
+          echo "[Step 4/5] 健康检查..."
+          MAX_RETRIES=3
+          RETRY_DELAY=10
+
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "  尝试 $i/$MAX_RETRIES..."
+            if ssh -o StrictHostKeyChecking=no ${ECS_USER}@${ECS_HOST} \
+              "curl -sf http://localhost:8900/api/health | grep -q ok"; then
+              echo "  [OK] 服务健康检查通过"
+              exit 0
+            fi
+            if [ $i -lt $MAX_RETRIES ]; then
+              echo "  等待 ${RETRY_DELAY}s 后重试..."
+              sleep $RETRY_DELAY
+            fi
+          done
+
+          echo "  [FAIL] 健康检查失败，触发回滚..."
+          exit 1
+
+      # ═══════════════════════════════════════════
+      # Step 5: 失败自动回滚
+      # ═══════════════════════════════════════════
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "============================================"
+          echo "  部署失败，执行自动回滚..."
+          echo "============================================"
+
+          ssh -o StrictHostKeyChecking=no ${ECS_USER}@${ECS_HOST} '
+            set -euo pipefail
+            REMOTE_DIR="'${REMOTE_DIR}'"
+            BACKUP_DIR="'${BACKUP_DIR}'"
+            TIMESTAMP="'${TIMESTAMP}'"
+
+            LATEST_BACKUP=$(ls -dt $BACKUP_DIR/*/ 2>/dev/null | head -1 | tr -d "\n")
+            if [ -z "$LATEST_BACKUP" ]; then
+              echo "错误: 没有可用的备份"
+              exit 1
+            fi
+
+            echo "回滚到: $LATEST_BACKUP"
+
+            systemctl stop questra-search 2>/dev/null || true
+
+            rm -rf $REMOTE_DIR/app $REMOTE_DIR/static
+            cp -r $LATEST_BACKUP/app $REMOTE_DIR/app 2>/dev/null || true
+            cp -r $LATEST_BACKUP/static $REMOTE_DIR/static 2>/dev/null || true
+            cp $LATEST_BACKUP/server.py $REMOTE_DIR/ 2>/dev/null || true
+            cp $LATEST_BACKUP/requirements.txt $REMOTE_DIR/ 2>/dev/null || true
+
+            DB_BACKUP=$(ls $BACKUP_DIR/questra_search_db_* 2>/dev/null | sort | tail -1 | tr -d "\n")
+            if [ -n "$DB_BACKUP" ]; then
+              cp $DB_BACKUP $REMOTE_DIR/data/questra_search.db
+            fi
+
+            systemctl start questra-search
+            sleep 3
+
+            if curl -sf http://localhost:8900/api/health > /dev/null 2>&1; then
+              echo "回滚成功"
+            else
+              echo "警告: 回滚后服务仍异常"
+            fi
+          '
+
+      # ═══════════════════════════════════════════
+      # Step 6: 部署状态总结
+      # ═══════════════════════════════════════════
+      - name: Deployment summary
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "============================================"
+            echo "  部署成功!"
+            echo "  URL: http://43.106.12.79/miro/"
+            echo "  Health: http://43.106.12.79:8900/api/health"
+            echo "============================================"
+          else
+            echo "============================================"
+            echo "  部署失败，已自动回滚"
+            echo "  请检查 GitHub Actions 日志"
+            echo "============================================"
+          fi

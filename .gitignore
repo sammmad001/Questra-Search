@@ -27,6 +27,12 @@ build/
 训练任务/*/__pycache__/
 训练任务/*.log
 
+# CI/CD 产物
+coverage.xml
+.coverage
+htmlcov/
+.pytest_cache/
+
 # IDE 配置
 .qoder/
 .vscode/
