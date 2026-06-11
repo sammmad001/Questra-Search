@@ -1,15 +1,18 @@
 """
 Questra-Search - FastAPI 应用
 """
+import logging
 from contextlib import asynccontextmanager
 import aiosqlite
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.database import init_db
-from app.config import DATABASE_PATH
+from app.config import DATABASE_PATH, PROMPTS_ENABLED
 from app.routers import pages, auth, chat, sessions, history, export
 from app.services.kb_retry import KbRetrySender
+
+logger = logging.getLogger("questra_search.main")
 
 
 @asynccontextmanager
@@ -24,6 +27,16 @@ async def lifespan(app: FastAPI):
 
     kb_sender = KbRetrySender(kb_db, interval_seconds=300)
     kb_sender.start()
+
+    # ── 初始化 Prompts 框架 ──
+    if PROMPTS_ENABLED:
+        try:
+            from app.services.prompts.engine import PromptEngine, set_prompt_engine
+            engine = PromptEngine.from_config()
+            set_prompt_engine(engine)
+            logger.info("Prompts 框架已初始化 (%d 个领域)", len(engine.domains))
+        except Exception:
+            logger.warning("Prompts 框架初始化失败，已禁用", exc_info=True)
 
     yield
 

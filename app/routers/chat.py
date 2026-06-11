@@ -7,6 +7,7 @@
 - 将 session_title / session_model 传递给 StreamRecorder
 """
 import json
+import logging
 import uuid
 
 import httpx
@@ -14,11 +15,13 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from aiosqlite import Connection
 
-from app.config import MIROMIND_API_BASE, MIROMIND_API_KEY, DEFAULT_MODEL, REQUEST_TIMEOUT, SEARCH_INSTRUCTION
+from app.config import MIROMIND_API_BASE, MIROMIND_API_KEY, DEFAULT_MODEL, REQUEST_TIMEOUT, SEARCH_INSTRUCTION, PROMPTS_ENABLED
 from app.auth import require_user
 from app.database import get_db
 from app.models import ChatRequest, CancelRequest
 from app.services.stream_recorder import StreamRecorder
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
@@ -79,11 +82,8 @@ async def chat(
 
     request_id = str(uuid.uuid4())[:8]
 
-    # 注入搜索引导指令
-    if SEARCH_INSTRUCTION:
-        enriched_message = f"{SEARCH_INSTRUCTION}\n\n{user_message}"
-    else:
-        enriched_message = user_message
+    # 注入搜索引导指令 + Prompts 框架富化
+    enriched_message = _enrich_message(user_message)
 
     # 选择流式生成器
     if use_responses_api:
@@ -148,6 +148,30 @@ async def list_models():
     """返回可用模型列表"""
     from app.config import MODELS
     return {"models": MODELS}
+
+
+async def _enrich_message(user_message: str) -> str:
+    """通过 Prompts 框架富化用户消息，失败时回退到 SEARCH_INSTRUCTION"""
+    if PROMPTS_ENABLED:
+        try:
+            from app.services.prompts.engine import get_prompt_engine
+            engine = get_prompt_engine()
+            if engine:
+                enriched = engine.enrich(user_message)
+                logger.info(
+                    "prompt_classification domain=%s confidence=%.2f template=%s",
+                    enriched.classification.domain,
+                    enriched.classification.confidence,
+                    enriched.template_used,
+                )
+                return enriched.system_prompt
+        except Exception:
+            logger.warning("PromptEngine 富化失败，回退到 SEARCH_INSTRUCTION", exc_info=True)
+
+    # 回退：使用原有 SEARCH_INSTRUCTION 逻辑
+    if SEARCH_INSTRUCTION:
+        return f"{SEARCH_INSTRUCTION}\n\n{user_message}"
+    return user_message
 
 
 # ============ 内部流式生成器 ============

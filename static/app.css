@@ -65,6 +65,7 @@ body {
 
 /* ===== Header ===== */
 .header {
+    position: relative;
     background: var(--surface); padding: 0 16px; height: 48px;
     border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 10px;
@@ -497,6 +498,22 @@ body {
 }
 .export-dropdown button:hover { background: var(--border); }
 
+/* ===== Header Export Button (PC) ===== */
+.btn-header-export {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 10px; color: var(--dim);
+    font-size: 12px; cursor: pointer; transition: all 0.2s;
+    white-space: nowrap; flex-shrink: 0;
+}
+.btn-header-export:hover { border-color: var(--accent); color: var(--accent); }
+.btn-header-export svg { flex-shrink: 0; }
+
+/* Header export dropdown (positioned below header button) */
+.header-export-dropdown {
+    position: absolute; top: 100%; right: 0; margin-top: 4px;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 768px) {
     .hamburger { display: block; }
@@ -529,6 +546,9 @@ body {
     /* Answer area mobile */
     .answer-area { padding: 14px; font-size: 14px; }
     .msg-user .msg-bubble { max-width: 90%; }
+
+    /* Hide header export on mobile (use per-message export instead) */
+    .btn-header-export { display: none !important; }
 }
 
 /* Safe area for header */

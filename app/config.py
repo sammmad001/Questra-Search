@@ -47,6 +47,18 @@ KB_API_TOKEN: str = _get("KB_API_TOKEN", "")
 # KB_AUTO_INGEST: 是否自动导入聊天内容到知识库（"true" / "false"）
 KB_AUTO_INGEST: bool = _get("KB_AUTO_INGEST", "true").lower() == "true"
 
+# ── Prompts 框架配置 ──
+# PROMPTS_ENABLED: 是否启用 Prompts 框架（false 时回退到 SEARCH_INSTRUCTION）
+PROMPTS_ENABLED: bool = _get("PROMPTS_ENABLED", "true").lower() == "true"
+# PROMPTS_TEMPLATES_DIR: 模板文件目录（相对于 app/services/prompts/）
+PROMPTS_TEMPLATES_DIR: str = _get("PROMPTS_TEMPLATES_DIR", "templates")
+# PROMPTS_CLASSIFICATION_THRESHOLD: 分类置信度阈值（低于此值使用 general 模板）
+PROMPTS_CLASSIFICATION_THRESHOLD: float = float(_get("PROMPTS_CLASSIFICATION_THRESHOLD", "0.3"))
+# PROMPTS_MAX_SYSTEM_TOKENS: 每个模板的 system prompt 最大 token 预算
+PROMPTS_MAX_SYSTEM_TOKENS: int = int(_get("PROMPTS_MAX_SYSTEM_TOKENS", "500"))
+# PROMPTS_VERBOSE_LOG: 是否输出详细分类日志
+PROMPTS_VERBOSE_LOG: bool = _get("PROMPTS_VERBOSE_LOG", "false").lower() == "true"
+
 # 可用模型列表
 MODELS = [
     {

@@ -451,6 +451,11 @@ const Sessions = {
         this.render();
         $('headerTitle').textContent = (App.sessions.find(s => s.id === sessionId) || {}).title || 'Questra-Search 研究平台';
 
+        // 隐藏 header 导出按钮（新会话加载前重置）
+        Chat._lastAssistantMsgId = null;
+        const exportBtn = $('btnHeaderExport');
+        if (exportBtn) exportBtn.style.display = 'none';
+
         // 加载消息
         const messagesEl = $('messages');
         messagesEl.innerHTML = '';
@@ -548,6 +553,7 @@ const Chat = {
     rawMarkdown: '',
     currentMsgEl: null,   // 当前正在流式渲染的 assistant 消息
     phasesEl: null,       // 当前推理 phases 容器
+    _lastAssistantMsgId: null,  // 最后一条 assistant 消息 ID，供 header 导出按钮使用
     phaseCount: 0,
     searchCount: 0,
 
@@ -674,6 +680,11 @@ const Chat = {
 
         // 刷新会话列表（updated_at 排序）
         Sessions.load();
+
+        // 重新加载当前会话消息，确保 action 按钮（复制/导出）和 header 导出按钮就绪
+        if (App.activeSessionId) {
+            await Sessions.switchTo(App.activeSessionId);
+        }
     },
 
     cancel() {
@@ -838,6 +849,11 @@ const Chat = {
 
         msgs.appendChild(div);
         msgs.scrollTop = msgs.scrollHeight;
+
+        // 更新 header 导出按钮的目标消息
+        Chat._lastAssistantMsgId = msg.id;
+        const btn = $('btnHeaderExport');
+        if (btn) btn.style.display = 'flex';
     },
 
     _createAssistantPlaceholder() {
@@ -1062,6 +1078,28 @@ const Export = {
         btn.parentElement.appendChild(dd);
 
         // 点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', function close() {
+                dd.remove(); document.removeEventListener('click', close);
+            }, { once: true });
+        }, 10);
+    },
+
+    showHeaderMenu(event) {
+        event.stopPropagation();
+        const msgId = Chat._lastAssistantMsgId;
+        if (!msgId) { UI.toast('暂无消息可导出', 'error'); return; }
+
+        document.querySelectorAll('.export-dropdown').forEach(e => e.remove());
+
+        const btn = $('btnHeaderExport');
+        const dd = document.createElement('div');
+        dd.className = 'export-dropdown header-export-dropdown';
+        dd.innerHTML = '<button onclick="Export.toPDF(' + msgId + ",'answer');this.parentElement.remove()">仅答案</button>"
+            + '<button onclick="Export.toPDF(' + msgId + ",'full');this.parentElement.remove()">完整分析</button>";
+        btn.parentElement.style.position = 'relative';
+        btn.parentElement.appendChild(dd);
+
         setTimeout(() => {
             document.addEventListener('click', function close() {
                 dd.remove(); document.removeEventListener('click', close);
