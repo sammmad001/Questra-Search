@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0f1117">
+    <title>Questra-Search 研究平台</title>
+    <link rel="stylesheet" href="static/app.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/eventsource-parser@3/dist/index.umd.js"></script>
+</head>
+<body>
+    <!-- 登录视图 -->
+    <div id="loginView" class="view">
+        <div class="login-card">
+            <div class="login-logo"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></div>
+            <h1>Questra-Search 研究平台</h1>
+            <p class="login-subtitle">深度研究分析工具</p>
+            <div class="login-form">
+                <input type="text" id="loginUser" placeholder="用户名" autocomplete="username">
+                <input type="password" id="loginPass" placeholder="密码" autocomplete="current-password">
+                <div id="loginError" class="login-error"></div>
+                <button class="btn btn-login" id="loginBtn" onclick="Auth.login()">登录</button>
+                <div class="login-switch">
+                    还没有账户？<a href="#" onclick="Auth.showRegister()">申请注册</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 注册视图 -->
+    <div id="registerView" class="view" style="display:none">
+        <div class="login-card register-card">
+            <div class="login-logo"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg></div>
+            <h1>注册新账户</h1>
+            <p class="login-subtitle">需要邀请码才能注册</p>
+            <div class="login-form">
+                <input type="text" id="regUsername" placeholder="用户名 (3-20字符, 字母/数字/下划线/中文)" autocomplete="off">
+                <input type="password" id="regPassword" placeholder="密码 (至少6字符)" autocomplete="new-password">
+                <input type="password" id="regPassword2" placeholder="确认密码" autocomplete="new-password">
+                <input type="text" id="regDisplayName" placeholder="昵称 (选填)" autocomplete="off">
+                <input type="email" id="regEmail" placeholder="邮箱 (选填)" autocomplete="email">
+                <input type="text" id="regInviteCode" placeholder="邀请码" autocomplete="off" class="invite-input">
+                <div id="regError" class="login-error"></div>
+                <button class="btn btn-login" id="regBtn" onclick="Auth.register()">注册</button>
+                <div class="login-switch">
+                    已有账户？<a href="#" onclick="Auth.showLogin()">返回登录</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主界面 -->
+    <div id="appView" class="view" style="display:none">
+        <!-- 顶栏 -->
+        <header class="header">
+            <button class="hamburger" onclick="UI.toggleSidebar()"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button>
+            <div class="header-title" id="headerTitle">Questra-Search 研究平台</div>
+            <span class="badge" id="modelBadge">v3</span>
+            <div class="header-right">
+                <span id="modelName" class="model-tag"></span>
+                <div class="user-menu" id="userMenu">
+                    <span class="user-name" id="userName"></span>
+                    <button class="btn-account" onclick="Account.toggleMenu()"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                </div>
+            </div>
+        </header>
+
+        <div class="app-body">
+            <!-- 侧边栏 -->
+            <aside class="sidebar" id="sidebar">
+                <button class="btn-new-session" onclick="Sessions.create()">+ 新建研究</button>
+                <input type="text" class="sidebar-search" id="sidebarSearch"
+                    placeholder="搜索会话..." oninput="Sessions.filter(this.value)">
+                <div class="session-list" id="sessionList"></div>
+            </aside>
+
+            <!-- 主内容区 -->
+            <div class="main" id="mainArea">
+                <!-- 消息流 -->
+                <div class="messages" id="messages">
+                    <div class="empty-state" id="emptyState">
+                        <div class="empty-logo"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></div>
+                        <h2>Questra-Search 研究平台</h2>
+                        <p>输入问题，系统将自动搜索、分析并生成研究报告<br>实时展示处理过程：思考 → 搜索 → 分析 → 回答</p>
+                    </div>
+                </div>
+
+                <!-- 输入区 -->
+                <div class="input-area">
+                    <div class="model-selector" id="modelSelector">
+                        <button class="model-btn" id="modelBtn" onclick="UI.toggleModelMenu()">
+                            <span id="currentModelName">选择模型</span>
+                            <span class="arrow">▼</span>
+                        </button>
+                        <div class="model-dropdown" id="modelDropdown" style="display:none"></div>
+                    </div>
+                    <div class="input-row">
+                        <div id="input" contenteditable="true" class="chat-input" data-placeholder="输入你的研究问题... (Enter 发送, Shift+Enter 换行)"></div>
+                        <button class="btn btn-send" id="sendBtn" onclick="Chat.send()">发送</button>
+                        <button class="btn btn-cancel" id="cancelBtn" onclick="Chat.cancel()">取消</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 侧边栏遮罩 -->
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="UI.toggleSidebar()"></div>
+    </div>
+
+    <!-- 账户设置弹窗 -->
+    <div id="accountModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)Account.closeModal()">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>账户设置</h3>
+                <button class="modal-close" onclick="Account.closeModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <!-- 账户信息 -->
+                <div class="account-section" id="accountInfoSection">
+                    <h4 class="section-title">个人信息</h4>
+                    <div class="account-stats" id="accountStats"></div>
+                    <div class="form-group">
+                        <label>用户名</label>
+                        <input type="text" id="acctUsername" disabled class="form-input disabled">
+                    </div>
+                    <div class="form-group">
+                        <label>昵称</label>
+                        <input type="text" id="acctDisplayName" class="form-input" placeholder="输入昵称">
+                    </div>
+                    <div class="form-group">
+                        <label>邮箱</label>
+                        <input type="email" id="acctEmail" class="form-input" placeholder="输入邮箱">
+                    </div>
+                    <button class="btn btn-sm" onclick="Account.saveProfile()">保存资料</button>
+                </div>
+
+                <!-- 修改密码 -->
+                <div class="account-section">
+                    <h4 class="section-title">修改密码</h4>
+                    <div class="form-group">
+                        <label>旧密码</label>
+                        <input type="password" id="acctOldPass" class="form-input" placeholder="输入旧密码">
+                    </div>
+                    <div class="form-group">
+                        <label>新密码</label>
+                        <input type="password" id="acctNewPass" class="form-input" placeholder="输入新密码 (至少6字符)">
+                    </div>
+                    <button class="btn btn-sm" onclick="Account.changePassword()">修改密码</button>
+                </div>
+
+                <!-- 邀请码管理 -->
+                <div class="account-section">
+                    <h4 class="section-title">邀请码</h4>
+                    <p class="section-desc">生成邀请码邀请朋友使用</p>
+                    <div class="invite-actions">
+                        <button class="btn btn-sm" onclick="Account.generateInviteCode()">生成邀请码</button>
+                    </div>
+                    <div id="inviteCodesList" class="invite-codes-list"></div>
+                </div>
+
+                <!-- 退出登录 -->
+                <div class="account-section">
+                    <button class="btn btn-danger" onclick="Auth.logout()">退出登录</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 账户菜单（顶栏下拉） -->
+    <div id="accountDropdown" class="account-dropdown" style="display:none">
+        <button onclick="Account.openModal()"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>账户设置</button>
+        <button onclick="Auth.logout()"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>退出登录</button>
+    </div>
+
+<script src="static/app.js"></script>
+</body>
+</html>

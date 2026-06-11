@@ -1,0 +1,33 @@
+__pycache__/
+*.pyc
+*.pyo
+data/
+.env
+*.db
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.DS_Store
+
+# 测试截图 / 打包文件
+*.png
+*.tar.gz
+
+# ML 训练输出（2GB+ 数据）
+训练任务/output/
+训练任务/output_20/
+训练任务/output_100/
+训练任务/output_100_v2/
+训练任务/test_output/
+训练任务/test_output_both/
+训练任务/test_output_ml/
+训练任务/__pycache__/
+训练任务/*/__pycache__/
+训练任务/*.log
+
+# IDE 配置
+.qoder/
+.vscode/
+.idea/
