@@ -2,6 +2,11 @@
 
 All notable changes to Questra-Search are documented in this file.
 
+## [v1.1.1] - 2026-06-12
+
+### Fixed
+- 修复 CI 失败：app.js 模板字面量修复 node --check 语法错误；requirements.txt 新增 pyyaml 依赖
+
 ## [v1.1.0] - 2026-06-12
 
 ### Added

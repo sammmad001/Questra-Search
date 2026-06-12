@@ -1095,8 +1095,8 @@ const Export = {
         const btn = $('btnHeaderExport');
         const dd = document.createElement('div');
         dd.className = 'export-dropdown header-export-dropdown';
-        dd.innerHTML = '<button onclick="Export.toPDF(' + msgId + ",'answer');this.parentElement.remove()">仅答案</button>"
-            + '<button onclick="Export.toPDF(' + msgId + ",'full');this.parentElement.remove()">完整分析</button>";
+        dd.innerHTML = `<button onclick="Export.toPDF(${msgId},'answer');this.parentElement.remove()">仅答案</button>`
+            + `<button onclick="Export.toPDF(${msgId},'full');this.parentElement.remove()">完整分析</button>`;
         btn.parentElement.style.position = 'relative';
         btn.parentElement.appendChild(dd);
 
