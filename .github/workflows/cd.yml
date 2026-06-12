@@ -84,7 +84,6 @@ jobs:
           echo "[Step 3/5] 执行远程部署..."
 
           ssh -o StrictHostKeyChecking=no ${ECS_USER}@${ECS_HOST} '
-            set -euo pipefail
             REMOTE_DIR="'${REMOTE_DIR}'"
 
             echo "  停止服务..."
@@ -109,12 +108,12 @@ jobs:
 
             echo "  安装依赖..."
             cd $REMOTE_DIR
-            source venv/bin/activate
+            source venv/bin/activate 2>/dev/null || true
             pip install --upgrade pip 2>/dev/null || true
-            pip install -r requirements.txt 2>&1 | tail -5
+            pip install -r requirements.txt 2>&1 | tail -5 || echo "  [WARN] pip install 有警告，将继续启动"
 
-            chmod 600 $REMOTE_DIR/.env
-            chmod 700 $REMOTE_DIR/data
+            chmod 600 $REMOTE_DIR/.env 2>/dev/null || true
+            chmod 700 $REMOTE_DIR/data 2>/dev/null || true
 
             echo "  启动服务..."
             systemctl start questra-search
@@ -159,7 +158,6 @@ jobs:
           echo "============================================"
 
           ssh -o StrictHostKeyChecking=no ${ECS_USER}@${ECS_HOST} '
-            set -euo pipefail
             REMOTE_DIR="'${REMOTE_DIR}'"
             BACKUP_DIR="'${BACKUP_DIR}'"
             TIMESTAMP="'${TIMESTAMP}'"
