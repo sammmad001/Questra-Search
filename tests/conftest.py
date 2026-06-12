@@ -36,6 +36,11 @@ def client():
     database_mod._db_path = db_path
     os.environ["DATABASE_PATH"] = db_path
 
+    # 显式初始化数据库表结构（防御性：确保 TestClient lifespan 触发前表已存在）
+    from app.database import init_db
+    import asyncio
+    asyncio.run(init_db())
+
     from app.main import app
     with TestClient(app) as c:
         yield c

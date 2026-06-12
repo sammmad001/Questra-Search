@@ -2,6 +2,11 @@
 
 All notable changes to Questra-Search are documented in this file.
 
+## [v1.1.2] - 2026-06-12
+
+### Fixed
+- 修复 CI 后端测试：conftest.py 显式调用 init_db() 确保数据库表在 TestClient 启动前初始化
+
 ## [v1.1.1] - 2026-06-12
 
 ### Fixed
