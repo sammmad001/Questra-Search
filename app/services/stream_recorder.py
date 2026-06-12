@@ -81,7 +81,12 @@ class StreamRecorder:
             self._own_db = None
 
     async def record(self) -> AsyncGenerator[str, None]:
-        """包装生成器：yield 相同的 SSE 行，同时缓冲数据"""
+        """包装生成器：yield 相同的 SSE 行，同时缓冲数据
+
+        当客户端断开连接（切换会话、关闭页面）时，GeneratorExit
+        会被抛出到 yield 点。此时仍需保存已累积的部分内容，
+        确保用户切回原会话后能看到不完整的回答。
+        """
         try:
             # 先保存用户消息
             await self._save_user_message()
@@ -91,9 +96,21 @@ class StreamRecorder:
                 # 解析并缓冲
                 await self._parse_line(line)
 
-            # 流结束，保存 assistant 消息
-            await self._save_assistant_message()
+        except GeneratorExit:
+            # 客户端断开（切换会话 / 关闭页面）→ 保存已累积的部分内容
+            self.status = "interrupted"
+            raise
+
         finally:
+            # 无论正常完成还是中断，都保存已累积的内容
+            if self.content or self.thinking_text:
+                try:
+                    await self._save_assistant_message()
+                except Exception:
+                    logger.error(
+                        "保存 assistant 消息失败 (session=%d)",
+                        self.session_id, exc_info=True,
+                    )
             await self._close_db()
 
     async def _parse_line(self, line: str):

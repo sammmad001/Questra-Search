@@ -447,6 +447,17 @@ const Sessions = {
     },
 
     async switchTo(sessionId) {
+        // 切换会话前取消正在进行的流式传输
+        if (App.isStreaming) {
+            Chat.cancel();
+            App.isStreaming = false;
+            Chat.stopElapsed();
+            $('sendBtn').disabled = false;
+            $('sendBtn').textContent = '发送';
+            $('cancelBtn').classList.remove('visible');
+            Chat._abortController = null;
+        }
+
         App.activeSessionId = sessionId;
         this.render();
         $('headerTitle').textContent = (App.sessions.find(s => s.id === sessionId) || {}).title || 'Questra-Search 研究平台';
@@ -574,6 +585,9 @@ const Chat = {
             } catch(e) { UI.toast('创建会话失败', 'error'); return; }
         }
 
+        // 记录正在流式传输的会话 ID，用于流结束后判断是否需要重新加载
+        const streamSessionId = App.activeSessionId;
+
         App.isStreaming = true;
         $('sendBtn').disabled = true;
         $('sendBtn').textContent = '分析中...';
@@ -681,8 +695,8 @@ const Chat = {
         // 刷新会话列表（updated_at 排序）
         Sessions.load();
 
-        // 重新加载当前会话消息，确保 action 按钮（复制/导出）和 header 导出按钮就绪
-        if (App.activeSessionId) {
+        // 重新加载会话消息（仅在未切换到其他会话时）
+        if (App.activeSessionId === streamSessionId) {
             await Sessions.switchTo(App.activeSessionId);
         }
     },

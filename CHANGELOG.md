@@ -2,6 +2,11 @@
 
 All notable changes to Questra-Search are documented in this file.
 
+## [v1.2.1] - 2026-06-12
+
+### Fixed
+- 修复流式传输中切换会话导致消息丢失：后端捕获 GeneratorExit 保存已累积的部分内容，前端切换前取消活跃流并跟踪流式会话 ID 避免错误重载
+
 ## [v1.2.0] - 2026-06-12
 
 ### Added
