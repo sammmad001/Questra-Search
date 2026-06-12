@@ -1,6 +1,7 @@
 """
 Questra-Search - FastAPI 应用
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 import aiosqlite
@@ -13,6 +14,26 @@ from app.routers import pages, auth, chat, sessions, history, export
 from app.services.kb_retry import KbRetrySender
 
 logger = logging.getLogger("questra_search.main")
+
+
+async def _cleanup_stale_streams():
+    """后台任务：定期将超时的 streaming 消息标记为 interrupted"""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            if not DATABASE_PATH:
+                continue
+            async with aiosqlite.connect(DATABASE_PATH) as db:
+                cursor = await db.execute(
+                    """UPDATE messages SET status = 'interrupted'
+                       WHERE status = 'streaming'
+                       AND created_at < datetime('now', '-5 minutes')"""
+                )
+                if cursor.rowcount > 0:
+                    logger.info("清理 %d 条过期 streaming 消息", cursor.rowcount)
+                await db.commit()
+        except Exception:
+            logger.debug("streaming 清理异常", exc_info=True)
 
 
 @asynccontextmanager
@@ -28,6 +49,9 @@ async def lifespan(app: FastAPI):
     kb_sender = KbRetrySender(kb_db, interval_seconds=300)
     kb_sender.start()
 
+    # ── 启动过期流式消息清理任务 ──
+    cleanup_task = asyncio.ensure_future(_cleanup_stale_streams())
+
     # ── 初始化 Prompts 框架 ──
     if PROMPTS_ENABLED:
         try:
@@ -40,7 +64,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # 关闭 KB 重试调度器 + 释放数据库连接
+    # 关闭后台任务 + KB 重试调度器 + 释放数据库连接
+    cleanup_task.cancel()
     kb_sender.stop()
     await kb_db.close()
 

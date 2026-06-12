@@ -2,6 +2,21 @@
 
 All notable changes to Questra-Search are documented in this file.
 
+## [v1.3.0] - 2026-06-12
+
+### Fixed
+- 根本性修复流式传输中切换会话消息丢失（v1.2.2 渐进式保存策略已实现但间隔过大+无轮询机制）
+
+### Added
+- 后端：渐进式保存频率提升（3事件/2秒双触发），新增活跃流注册表 is_session_streaming()
+- 后端：新增 GET /api/sessions/{id}/status 轻量轮询端点，返回流式消息状态+部分内容
+- 后端：get_session 自动清理过期 streaming 消息，返回 has_streaming 元数据
+- 后端：main.py 新增过期流清理后台任务（每60秒扫描，5分钟超时标记 interrupted）
+- 前端：新增 StreamingPoller 模块，切回有流式消息的会话时自动轮询直到完成
+- 前端：修复 Chat.send() 与 Sessions.switchTo() 的竞态条件（DOM 操作加会话守卫）
+- 前端：addContent() 添加 DOM 存在性检查防止操作已销毁元素
+- 前端：流式消息显示蓝色「正在生成中...」动画横幅，中断消息显示橙色横幅
+
 ## [v1.2.2] - 2026-06-12
 
 ### Fixed

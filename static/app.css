@@ -558,3 +558,62 @@ body {
         height: calc(48px + env(safe-area-inset-top));
     }
 }
+
+/* ===== Streaming Status Indicators ===== */
+.streaming-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    background: rgba(59, 130, 246, 0.1);
+    border-radius: 8px;
+    color: var(--accent);
+    font-size: 13px;
+    animation: pulse-glow 2s ease-in-out infinite;
+}
+.streaming-banner svg {
+    animation: spin 1s linear infinite;
+}
+.streaming-elapsed {
+    color: var(--dim);
+    font-size: 12px;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+@keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.streaming-interrupted .interrupted-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: 8px;
+    color: var(--orange);
+    font-size: 13px;
+}
+
+.answer-area.streaming-partial {
+    border-left: 3px solid var(--accent);
+    padding-left: 12px;
+    position: relative;
+}
+.answer-area.streaming-partial::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 16px;
+    background: var(--accent);
+    margin-left: 2px;
+    animation: blink 1s step-end infinite;
+    vertical-align: middle;
+}
+@keyframes blink {
+    50% { opacity: 0; }
+}

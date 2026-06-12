@@ -422,6 +422,82 @@ const Models = {
     },
 };
 
+// ===== Streaming Poller Module =====
+const StreamingPoller = {
+    _timer: null,
+    _sessionId: null,
+
+    start(sessionId) {
+        this.stop();
+        this._sessionId = sessionId;
+        this._scheduleNext();
+    },
+
+    stop() {
+        if (this._timer) {
+            clearTimeout(this._timer);
+            this._timer = null;
+        }
+        this._sessionId = null;
+    },
+
+    _scheduleNext() {
+        this._timer = setTimeout(() => this._poll(), 2000);
+    },
+
+    async _poll() {
+        const sid = this._sessionId;
+        if (!sid || App.activeSessionId !== sid) {
+            this.stop();
+            return;
+        }
+
+        try {
+            const resp = await API.get(`/api/sessions/${sid}/status`);
+            const data = await resp.json();
+
+            if (!data.has_streaming) {
+                // 后端已完成：完整刷新消息
+                this.stop();
+                await Sessions.switchTo(sid);
+                return;
+            }
+
+            // 原地更新流式消息的部分内容
+            if (data.streaming_messages && data.streaming_messages.length > 0) {
+                this._updateStreamingMessages(data.streaming_messages);
+            }
+
+            this._scheduleNext();
+        } catch(e) {
+            // 网络错误：重试
+            this._scheduleNext();
+        }
+    },
+
+    _updateStreamingMessages(streamingMsgs) {
+        for (const msg of streamingMsgs) {
+            const existingEl = document.querySelector(
+                `.msg-assistant[data-msg-id="${msg.id}"]`
+            );
+            if (existingEl) {
+                const answerEl = existingEl.querySelector('.answer-area');
+                if (answerEl) {
+                    answerEl.innerHTML = marked.parse(msg.content || '');
+                    answerEl.classList.add('streaming-partial');
+                }
+                // 更新 elapsed
+                const banner = existingEl.querySelector('.streaming-banner span');
+                if (banner && msg.duration_ms) {
+                    banner.textContent = 'AI 正在生成中... (' + (msg.duration_ms/1000).toFixed(0) + 's)';
+                }
+            }
+        }
+        const msgs = $('messages');
+        if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    },
+};
+
 // ===== Sessions Module =====
 const Sessions = {
     async load() {
@@ -458,6 +534,9 @@ const Sessions = {
             Chat._abortController = null;
         }
 
+        // 停止之前会话的轮询
+        StreamingPoller.stop();
+
         App.activeSessionId = sessionId;
         this.render();
         $('headerTitle').textContent = (App.sessions.find(s => s.id === sessionId) || {}).title || 'Questra-Search 研究平台';
@@ -483,6 +562,11 @@ const Sessions = {
                     }
                 });
                 messagesEl.scrollTop = messagesEl.scrollHeight;
+            }
+
+            // 如果有流式传输中的消息，启动轮询
+            if (data.has_streaming) {
+                StreamingPoller.start(sessionId);
             }
         } catch(e) {}
 
@@ -676,14 +760,26 @@ const Chat = {
                 }
             }
         } catch(e) {
-            if (e.name === 'AbortError') {
-                this.addContent('\n\n> 任务已取消');
-            } else {
-                this.addContent('\n\n> 连接失败: ' + esc(e.message));
+            // 竞态守卫：只在未切换会话时更新 DOM
+            if (App.activeSessionId === streamSessionId) {
+                if (e.name === 'AbortError') {
+                    this.addContent('\n\n> 任务已取消');
+                } else {
+                    this.addContent('\n\n> 连接失败: ' + esc(e.message));
+                }
             }
         }
 
-        this._finalizeAssistantMsg();
+        // 竞态守卫：只在未切换会话时 finalize DOM
+        if (App.activeSessionId === streamSessionId) {
+            this._finalizeAssistantMsg();
+        } else {
+            // 已切换到其他会话，清理悬空引用
+            this.currentAnswerEl = null;
+            this.currentMsgEl = null;
+            this.phasesEl = null;
+            this.currentThinkingEl = null;
+        }
         this.stopElapsed();
         App.isStreaming = false;
         $('sendBtn').disabled = false;
@@ -698,6 +794,9 @@ const Chat = {
         // 重新加载会话消息（仅在未切换到其他会话时）
         if (App.activeSessionId === streamSessionId) {
             await Sessions.switchTo(App.activeSessionId);
+        } else {
+            // 已切换到其他会话，启动该会话的轮询（可能有 streaming 消息）
+            StreamingPoller.start(App.activeSessionId);
         }
     },
 
@@ -785,6 +884,25 @@ const Chat = {
         const msgs = $('messages');
         const div = document.createElement('div');
         div.className = 'msg msg-assistant';
+        if (msg.id) div.setAttribute('data-msg-id', msg.id);
+
+        // 流式状态视觉指示
+        if (msg.status === 'streaming') {
+            div.classList.add('streaming-active');
+            const banner = document.createElement('div');
+            banner.className = 'streaming-banner';
+            banner.innerHTML = ico('loader', 14)
+                + ' <span>AI 正在生成中...</span>'
+                + (msg.duration_ms ? ' <span class="streaming-elapsed">(' + (msg.duration_ms/1000).toFixed(0) + 's)</span>' : '');
+            div.appendChild(banner);
+        } else if (msg.status === 'interrupted') {
+            div.classList.add('streaming-interrupted');
+            const banner = document.createElement('div');
+            banner.className = 'interrupted-banner';
+            banner.innerHTML = ico('alert-circle', 14)
+                + ' <span>回答中断（已保存部分内容）</span>';
+            div.appendChild(banner);
+        }
 
         // 推理过程
         const events = msg.tool_events || [];
@@ -836,17 +954,20 @@ const Chat = {
         // 回答
         const answer = document.createElement('div');
         answer.className = 'answer-area';
+        if (msg.status === 'streaming') answer.classList.add('streaming-partial');
         answer.innerHTML = marked.parse(msg.content || '');
         div.appendChild(answer);
 
-        // 操作按钮
-        const actions = document.createElement('div');
-        actions.className = 'msg-actions';
-        actions.innerHTML = `
-            <button class="msg-action-btn" onclick="Chat.copyContent(this)" data-content="${esc(msg.content||'').replace(/"/g, '&quot;')}">复制</button>
-            <button class="msg-action-btn" onclick="Export.showMenu(${msg.id}, this)">导出</button>
-        `;
-        div.appendChild(actions);
+        // 操作按钮（仅已完成或中断的消息显示，流式中的不显示）
+        if (msg.status !== 'streaming') {
+            const actions = document.createElement('div');
+            actions.className = 'msg-actions';
+            actions.innerHTML = `
+                <button class="msg-action-btn" onclick="Chat.copyContent(this)" data-content="${esc(msg.content||'').replace(/"/g, '&quot;')}">复制</button>
+                <button class="msg-action-btn" onclick="Export.showMenu(${msg.id}, this)">导出</button>
+            `;
+            div.appendChild(actions);
+        }
 
         // 用量
         if (msg.total_tokens) {
@@ -864,10 +985,12 @@ const Chat = {
         msgs.appendChild(div);
         msgs.scrollTop = msgs.scrollHeight;
 
-        // 更新 header 导出按钮的目标消息
-        Chat._lastAssistantMsgId = msg.id;
-        const btn = $('btnHeaderExport');
-        if (btn) btn.style.display = 'flex';
+        // 更新 header 导出按钮的目标消息（仅已完成的消息）
+        if (msg.status !== 'streaming') {
+            Chat._lastAssistantMsgId = msg.id;
+            const btn = $('btnHeaderExport');
+            if (btn) btn.style.display = 'flex';
+        }
     },
 
     _createAssistantPlaceholder() {
@@ -1018,7 +1141,8 @@ const Chat = {
 
     addContent(text) {
         this.rawMarkdown += text;
-        if (this.currentAnswerEl) {
+        // 竞态守卫：检查元素仍在 DOM 中
+        if (this.currentAnswerEl && document.contains(this.currentAnswerEl)) {
             this.currentAnswerEl.innerHTML = marked.parse(this.rawMarkdown);
             $('messages').scrollTop = $('messages').scrollHeight;
         }

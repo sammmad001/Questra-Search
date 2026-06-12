@@ -19,6 +19,15 @@ from app.database import _ensure_db_path
 logger = logging.getLogger(__name__)
 
 
+# ── 活跃流注册表（模块级，供 sessions 路由查询） ──
+_active_streams: dict[int, int] = {}  # session_id → id(recorder)
+
+
+def is_session_streaming(session_id: int) -> bool:
+    """判断某个会话是否仍有活跃的 SSE 流式传输"""
+    return session_id in _active_streams
+
+
 def _get_db_path() -> str:
     _ensure_db_path()
     from app.database import _db_path
@@ -70,7 +79,9 @@ class StreamRecorder:
         self._assistant_msg_id: Optional[int] = None
         # 渐进式保存计数器（每 N 个 content chunk 更新一次 DB）
         self._content_update_counter: int = 0
-        self._CONTENT_UPDATE_INTERVAL: int = 20  # 每 20 个 content 事件更新一次
+        self._CONTENT_UPDATE_INTERVAL: int = 3  # 每 3 个 content 事件更新一次
+        self._TIME_UPDATE_INTERVAL: float = 2.0  # 每 2 秒至少更新一次
+        self._last_save_time: float = time.time()
 
         # 独立的数据库连接（生命周期与流式传输同步）
         self._own_db = None
@@ -104,6 +115,9 @@ class StreamRecorder:
         GeneratorExit，但已保存的部分内容仍然可在 DB 中查到。
         """
         try:
+            # 注册活跃流（供 API 查询）
+            _active_streams[self.session_id] = id(self)
+
             # 先保存用户消息
             await self._save_user_message()
 
@@ -142,7 +156,13 @@ class StreamRecorder:
             raise
 
         finally:
-            await self._close_db()
+            _active_streams.pop(self.session_id, None)
+            try:
+                await self._close_db()
+            except Exception:
+                logger.debug(
+                    "DB 关闭异常 (session=%d)", self.session_id, exc_info=True,
+                )
 
     async def _parse_line(self, line: str):
         """解析 SSE 行，缓冲数据，并触发渐进式保存"""
@@ -170,9 +190,12 @@ class StreamRecorder:
         elif evt_type == "content":
             self.content += evt.get("content", "")
             self._content_update_counter += 1
-            # 渐进式保存：每 N 个 content 事件更新一次 DB
-            if self._content_update_counter % self._CONTENT_UPDATE_INTERVAL == 0:
+            now = time.time()
+            # 渐进式保存：计数 + 时间双触发（取先到者）
+            if (self._content_update_counter % self._CONTENT_UPDATE_INTERVAL == 0
+                    or now - self._last_save_time >= self._TIME_UPDATE_INTERVAL):
                 await self._update_assistant_progress()
+                self._last_save_time = now
         elif evt_type == "done":
             self.usage = evt.get("usage", {})
             self.response_id = evt.get("response_id")

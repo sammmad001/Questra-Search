@@ -111,6 +111,16 @@ async def get_session(
     if not session:
         return JSONResponse(status_code=404, content={"detail": "会话不存在"})
 
+    # 清理过期流式消息：如果该会话无活跃流，残留的 streaming 消息标记为 interrupted
+    from app.services.stream_recorder import is_session_streaming
+    if not is_session_streaming(session_id):
+        await db.execute(
+            "UPDATE messages SET status = 'interrupted' "
+            "WHERE session_id = ? AND status = 'streaming'",
+            (session_id,)
+        )
+        await db.commit()
+
     # 获取消息列表
     import json
     cursor = await db.execute(
@@ -142,6 +152,8 @@ async def get_session(
         }
         messages.append(msg)
 
+    has_streaming = any(m["status"] == "streaming" for m in messages)
+
     return {
         "id": session["id"],
         "title": session["title"],
@@ -149,6 +161,74 @@ async def get_session(
         "created_at": session["created_at"],
         "updated_at": session["updated_at"],
         "messages": messages,
+        "has_streaming": has_streaming,
+    }
+
+
+@router.get("/{session_id}/status")
+async def get_session_status(
+    session_id: int,
+    user: dict = Depends(require_user),
+    db: Connection = Depends(get_db),
+):
+    """轻量级轮询端点：返回流式消息状态 + 部分内容"""
+    if isinstance(user, JSONResponse):
+        return user
+
+    # 验证会话属于当前用户
+    cursor = await db.execute(
+        "SELECT id FROM sessions WHERE id = ? AND user_id = ? AND is_deleted = 0",
+        (session_id, user["id"])
+    )
+    if not await cursor.fetchone():
+        return JSONResponse(status_code=404, content={"detail": "会话不存在"})
+
+    # 清理过期流式消息
+    from app.services.stream_recorder import is_session_streaming
+    actively_streaming = is_session_streaming(session_id)
+    if not actively_streaming:
+        await db.execute(
+            "UPDATE messages SET status = 'interrupted' "
+            "WHERE session_id = ? AND status = 'streaming'",
+            (session_id,)
+        )
+        await db.commit()
+
+    # 查询消息状态摘要
+    import json as _json
+    cursor = await db.execute(
+        """SELECT id, status, length(content) as content_len
+           FROM messages WHERE session_id = ?
+           ORDER BY created_at ASC""",
+        (session_id,)
+    )
+    rows = await cursor.fetchall()
+
+    # 提取正在流式传输的消息的完整内容（供前端原地更新）
+    streaming_messages = []
+    for r in rows:
+        if r["status"] == "streaming":
+            msg_cursor = await db.execute(
+                """SELECT id, content, thinking_text, tool_events, status, duration_ms
+                   FROM messages WHERE id = ?""",
+                (r["id"],)
+            )
+            msg_row = await msg_cursor.fetchone()
+            if msg_row:
+                streaming_messages.append({
+                    "id": msg_row["id"],
+                    "content": msg_row["content"] or "",
+                    "thinking_text": msg_row["thinking_text"] or "",
+                    "tool_events": _json.loads(msg_row["tool_events"] or "[]"),
+                    "status": msg_row["status"],
+                    "duration_ms": msg_row["duration_ms"],
+                })
+
+    return {
+        "has_streaming": any(r["status"] == "streaming" for r in rows),
+        "is_actively_streaming": actively_streaming,
+        "message_count": len(rows),
+        "streaming_messages": streaming_messages,
     }
 
 
