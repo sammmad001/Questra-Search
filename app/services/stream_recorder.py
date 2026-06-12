@@ -36,7 +36,15 @@ def _get_kb_config():
 
 
 class StreamRecorder:
-    """包装 SSE 生成器，同时缓冲事件数据，完成后持久化到 DB + 知识库"""
+    """包装 SSE 生成器，同时缓冲事件数据，完成后持久化到 DB + 知识库
+
+    渐进式保存策略：
+    - 流开始时即创建 status='streaming' 的 assistant 消息
+    - 流式传输中每收到新内容就 UPDATE 该消息
+    - 流正常结束更新为 status='completed'
+    - 即使客户端中断（切换会话/关闭页面/Nginx 代理），已保存的部分内容
+      仍然可在 DB 中查到，用户切回原会话即可看到
+    """
 
     def __init__(self, inner: AsyncGenerator, db, user_id: int,
                  session_id: int, user_message: str, model: str,
@@ -60,6 +68,9 @@ class StreamRecorder:
         self.status = "completed"
         # 保存后获取的 message_id，用于 KB 入库后标记 kb_sent
         self._assistant_msg_id: Optional[int] = None
+        # 渐进式保存计数器（每 N 个 content chunk 更新一次 DB）
+        self._content_update_counter: int = 0
+        self._CONTENT_UPDATE_INTERVAL: int = 20  # 每 20 个 content 事件更新一次
 
         # 独立的数据库连接（生命周期与流式传输同步）
         self._own_db = None
@@ -83,38 +94,58 @@ class StreamRecorder:
     async def record(self) -> AsyncGenerator[str, None]:
         """包装生成器：yield 相同的 SSE 行，同时缓冲数据
 
-        当客户端断开连接（切换会话、关闭页面）时，GeneratorExit
-        会被抛出到 yield 点。此时仍需保存已累积的部分内容，
-        确保用户切回原会话后能看到不完整的回答。
+        采用渐进式保存策略：
+        1. 保存用户消息
+        2. 创建 status='streaming' 的 assistant 消息占位
+        3. 流式传输中定期 UPDATE 已累积的内容
+        4. 流结束更新为 status='completed' (或 'error')
+
+        这样即使客户端通过 Nginx 代理断开连接，后端可能不会收到
+        GeneratorExit，但已保存的部分内容仍然可在 DB 中查到。
         """
         try:
             # 先保存用户消息
             await self._save_user_message()
+
+            # 创建 streaming 状态的 assistant 消息占位
+            await self._create_assistant_placeholder()
 
             async for line in self.inner:
                 yield line
                 # 解析并缓冲
                 await self._parse_line(line)
 
+            # 流正常结束，最终更新
+            await self._finalize_assistant_message()
+            logger.info(
+                "流式传输完成: session=%d msg_id=%s content_len=%d",
+                self.session_id, self._assistant_msg_id, len(self.content),
+            )
+
         except GeneratorExit:
-            # 客户端断开（切换会话 / 关闭页面）→ 保存已累积的部分内容
+            # 客户端断开 → 标记为 interrupted 并保存已累积内容
             self.status = "interrupted"
+            await self._finalize_assistant_message()
+            logger.info(
+                "流式传输中断: session=%d msg_id=%s content_len=%d",
+                self.session_id, self._assistant_msg_id, len(self.content),
+            )
+            raise
+
+        except Exception:
+            # 流内部错误 → 标记 error 并保存已累积内容
+            self.status = "error"
+            await self._finalize_assistant_message()
+            logger.error(
+                "流式传输异常: session=%d", self.session_id, exc_info=True,
+            )
             raise
 
         finally:
-            # 无论正常完成还是中断，都保存已累积的内容
-            if self.content or self.thinking_text:
-                try:
-                    await self._save_assistant_message()
-                except Exception:
-                    logger.error(
-                        "保存 assistant 消息失败 (session=%d)",
-                        self.session_id, exc_info=True,
-                    )
             await self._close_db()
 
     async def _parse_line(self, line: str):
-        """解析 SSE 行，缓冲数据"""
+        """解析 SSE 行，缓冲数据，并触发渐进式保存"""
         line = line.strip()
         if not line or line.startswith(":"):
             return
@@ -138,6 +169,10 @@ class StreamRecorder:
             self.tool_events.append(evt)
         elif evt_type == "content":
             self.content += evt.get("content", "")
+            self._content_update_counter += 1
+            # 渐进式保存：每 N 个 content 事件更新一次 DB
+            if self._content_update_counter % self._CONTENT_UPDATE_INTERVAL == 0:
+                await self._update_assistant_progress()
         elif evt_type == "done":
             self.usage = evt.get("usage", {})
             self.response_id = evt.get("response_id")
@@ -159,8 +194,98 @@ class StreamRecorder:
         )
         await db.commit()
 
+    async def _create_assistant_placeholder(self):
+        """流开始时创建 status='streaming' 的 assistant 消息占位"""
+        db = await self._get_db()
+        await db.execute(
+            """INSERT INTO messages
+               (session_id, role, content, model, thinking_text, tool_events,
+                prompt_tokens, completion_tokens, total_tokens, reasoning_tokens,
+                duration_ms, response_id, status)
+               VALUES (?, 'assistant', '', ?, '', '[]', 0, 0, 0, 0, 0, NULL, 'streaming')""",
+            (self.session_id, self.model),
+        )
+        cursor = await db.execute("SELECT last_insert_rowid()")
+        row = await cursor.fetchone()
+        self._assistant_msg_id = row[0] if row else None
+        await db.commit()
+        logger.debug(
+            "创建 streaming 占位: session=%d msg_id=%s",
+            self.session_id, self._assistant_msg_id,
+        )
+
+    async def _update_assistant_progress(self):
+        """流式传输中定期更新已累积的内容到 DB"""
+        if not self._assistant_msg_id:
+            return
+        try:
+            db = await self._get_db()
+            await db.execute(
+                """UPDATE messages SET
+                   content = ?, thinking_text = ?, tool_events = ?,
+                   duration_ms = ?, status = 'streaming'
+                   WHERE id = ?""",
+                (
+                    self.content,
+                    self.thinking_text,
+                    json.dumps(self.tool_events, ensure_ascii=False),
+                    int((time.time() - self.start_time) * 1000),
+                    self._assistant_msg_id,
+                ),
+            )
+            await db.commit()
+        except Exception:
+            logger.debug(
+                "渐进式更新失败 (session=%d)", self.session_id, exc_info=True,
+            )
+
+    async def _finalize_assistant_message(self):
+        """流结束（正常完成或中断）时最终更新 assistant 消息"""
+        if not self._assistant_msg_id:
+            # 占位未创建，尝试直接插入（降级到一次性保存）
+            await self._save_assistant_message()
+            return
+
+        duration_ms = int((time.time() - self.start_time) * 1000)
+        usage = self.usage or {}
+        usage_details = usage.get("completion_tokens_details", {})
+
+        try:
+            db = await self._get_db()
+            await db.execute(
+                """UPDATE messages SET
+                   content = ?, thinking_text = ?, tool_events = ?,
+                   prompt_tokens = ?, completion_tokens = ?,
+                   total_tokens = ?, reasoning_tokens = ?,
+                   duration_ms = ?, response_id = ?, status = ?
+                   WHERE id = ?""",
+                (
+                    self.content,
+                    self.thinking_text,
+                    json.dumps(self.tool_events, ensure_ascii=False),
+                    usage.get("prompt_tokens", 0),
+                    usage.get("completion_tokens", 0),
+                    usage.get("total_tokens", 0),
+                    usage_details.get("reasoning_tokens", 0) if isinstance(usage_details, dict) else 0,
+                    duration_ms,
+                    self.response_id,
+                    self.status,
+                    self._assistant_msg_id,
+                ),
+            )
+            await db.commit()
+        except Exception:
+            logger.error(
+                "最终保存失败 (session=%d msg_id=%s)",
+                self.session_id, self._assistant_msg_id, exc_info=True,
+            )
+
+        # ── 知识库集成：仅成功完成时异步 POST ──
+        if self.status == "completed" and self.content:
+            asyncio.ensure_future(self._post_to_kb())
+
     async def _save_assistant_message(self):
-        """流结束后保存完整的 assistant 消息到 DB"""
+        """降级：一次性 INSERT assistant 消息（仅在占位未创建时使用）"""
         duration_ms = int((time.time() - self.start_time) * 1000)
         usage = self.usage or {}
         usage_details = usage.get("completion_tokens_details", {})
@@ -187,14 +312,12 @@ class StreamRecorder:
                 self.status,
             )
         )
-        cursor = await db.execute(
-            "SELECT last_insert_rowid()"
-        )
+        cursor = await db.execute("SELECT last_insert_rowid()")
         row = await cursor.fetchone()
         self._assistant_msg_id = row[0] if row else None
         await db.commit()
 
-        # ── 知识库集成：fire-and-forget 异步 POST，不阻塞 SSE 流 ──
+        # ── 知识库集成：仅成功完成时异步 POST ──
         if self.status == "completed" and self.content:
             asyncio.ensure_future(self._post_to_kb())
 

@@ -2,6 +2,11 @@
 
 All notable changes to Questra-Search are documented in this file.
 
+## [v1.2.2] - 2026-06-12
+
+### Fixed
+- 修复流式传输中切换会话导致消息丢失（根因：Nginx 代理不传播客户端断开，GeneratorExit 不可靠）：改为渐进式保存策略，流开始即创建 DB 占位，定期 UPDATE，前端缓存破坏
+
 ## [v1.2.1] - 2026-06-12
 
 ### Fixed
