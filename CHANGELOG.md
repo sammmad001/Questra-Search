@@ -2,6 +2,11 @@
 
 All notable changes to Questra-Search are documented in this file.
 
+## [v1.2.0] - 2026-06-12
+
+### Added
+- 修复 GitHub Actions Node.js 20 弃用警告：ssh-agent v0.9.0→v0.10.0，CI/CD 添加 FORCE_JAVASCRIPT_ACTIONS_TO_NODE24
+
 ## [v1.1.2] - 2026-06-12
 
 ### Fixed

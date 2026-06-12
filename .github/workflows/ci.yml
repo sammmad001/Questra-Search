@@ -12,6 +12,8 @@ jobs:
   # ═══════════════════════════════════════════════
   backend-test:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
@@ -75,6 +77,8 @@ jobs:
   # ═══════════════════════════════════════════════
   frontend-check:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

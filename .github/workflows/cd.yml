@@ -11,6 +11,7 @@ jobs:
     environment: production  # GitHub Environments 保护
 
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       ECS_HOST: "43.106.12.79"
       ECS_USER: "root"
       REMOTE_DIR: "/opt/questra-search"
@@ -24,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@v0.10.0
         with:
           ssh-private-key: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
 
