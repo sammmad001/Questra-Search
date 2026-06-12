@@ -2,6 +2,11 @@
 
 All notable changes to Questra-Search are documented in this file.
 
+## [v1.1.0] - 2026-06-12
+
+### Added
+- 修复 .gitignore 缺少 node_modules 排除规则；提交 package.json/package-lock.json 作为 setup-github-secrets.js 的 Node.js 依赖配置
+
 ## [v1.0.3] - 2026-06-11
 
 ### Fixed

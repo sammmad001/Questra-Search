@@ -38,3 +38,6 @@ htmlcov/
 .vscode/
 .idea/
 release.sh
+
+# Node.js (GitHub Secrets 配置脚本)
+node_modules/
