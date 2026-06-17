@@ -6,7 +6,7 @@ import aiosqlite
 from pathlib import Path
 from typing import AsyncGenerator
 
-from app.config import DATABASE_PATH
+import app.config
 
 # SQL 建表语句
 _CREATE_TABLES = """
@@ -76,11 +76,15 @@ _db_path: str = ""
 
 
 def _ensure_db_path():
-    """确保数据库目录存在"""
+    """确保数据库目录存在
+
+    动态读取 app.config.DATABASE_PATH，使测试 fixture 能覆盖数据库路径。
+    """
     global _db_path
-    _db_path = DATABASE_PATH
-    db_dir = Path(_db_path).parent
-    db_dir.mkdir(parents=True, exist_ok=True)
+    _db_path = app.config.DATABASE_PATH
+    if _db_path != ":memory:":
+        db_dir = Path(_db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
 
 
 async def init_db():
