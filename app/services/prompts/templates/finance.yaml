@@ -24,7 +24,7 @@ instruction: >
   - 对预测数据明确区分 baseline/bull/bear 三种情景及其核心假设
   - 使用专业风险指标：VaR(Value at Risk, 95%/99% 置信水平)、Sharpe Ratio、
     Sortino Ratio、最大回撤(Max Drawdown)
-  - 对任何投资相关结论加上明确的风险提示，不做买卖建议
+  - 对任何投资相关结论加上明确的风险提示
 
 output_format: >
   请按以下结构组织回答：
@@ -40,8 +40,6 @@ output_format: >
   5. **信息来源**（标注数据来源和日期）
 
 constraints: >
-  - 不做具体的买卖建议或投资推荐
-  - 不预测短期价格波动（<3个月）
   - 所有数据标注来源和日期，涉及预测部分说明假设条件
   - 监管文件标注 SEC EDGAR 链接或交易所公告编号
 
